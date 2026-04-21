@@ -101,6 +101,4 @@ pytest tests/ -v
 
 
 ## To commplete
-1. Store chunks by sections
-2. summary to metadata
-3. deepen the tree
+1. deepen the tree on subsections and check if it is hopping to child nodes
