@@ -667,3 +667,12 @@ pytest tests/ -v
 | `HISTORY_FILE` | `data/history.json` | Path for persistent query history. |
 | `MAX_HOPS` | `3` | Maximum re-retrieval attempts before returning "insufficient context". |
 | `API_BASE_URL` | `http://localhost:8000` | Base URL the Streamlit UI uses to reach the FastAPI backend. |
+
+
+<img width="950" height="436" alt="vectorless 1" src="https://github.com/user-attachments/assets/c70a49d8-dec8-433f-a7e7-46f4205876e4" />
+<img width="656" height="290" alt="vectorless 3" src="https://github.com/user-attachments/assets/d3a5ffbb-11f1-4e10-beb9-3bdb2f581170" />
+<img width="716" height="606" alt="image" src="https://github.com/user-attachments/assets/b18ec17e-d2da-439a-a988-840f49c470d1" />
+
+
+
+
