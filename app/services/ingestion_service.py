@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
+from utils.chunk_summarizer import summarize_chunk
 from utils.logging_utils import get_logger
 from utils.metadata_extractor import attach_metadata
 from utils.pdf_parser import parse_pdf
@@ -51,6 +52,22 @@ def ingest_document(
 
     # Attach metadata
     enriched = attach_metadata(raw_chunks, filename=filename, tags=tags)
+
+    # Generate a short summary per chunk and store it inside metadata
+    logger.info("Generating summaries for %d chunks …", len(enriched))
+    for chunk in enriched:
+        section_label = chunk.get("section", "")
+        summary = summarize_chunk(
+            text=chunk["text"],
+            section=section_label,
+            doc_name=filename,
+        )
+        chunk.setdefault("metadata", {})
+        chunk["metadata"]["summary"] = summary
+        chunk["metadata"]["section"] = section_label
+        chunk["metadata"]["subsection"] = chunk.get("subsection", "")
+        chunk["metadata"]["page_range"] = chunk.get("page_range", [chunk.get("page_number", 0)])
+    logger.info("Summaries generated.")
 
     # Persist parsed chunks
     stem = Path(filename).stem

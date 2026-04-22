@@ -76,7 +76,7 @@ def retrieve_from_tree(
         evidence.append(
             EvidenceNode(
                 node_id=node.node_id,
-                summary=node.get_content()[:500],  # truncate for UI
+                summary=node.metadata.get("summary") or node.get_content()[:300],
                 metadata=node.metadata or {},
             )
         )

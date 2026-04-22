@@ -1,22 +1,22 @@
 [
   {
-    "id": "b33eaa1b-370b-49b1-9e22-f76ecae08864",
-    "query": "what is wave energy",
-    "answer": "Insufficient context: the available documents do not contain enough information to answer this question confidently.\n\nBest available context:\nWave energy technology development in Ireland: Employing the triple helix \nmodel of innovation for pragmatic policy interventions\n☆\nC.A. Barry\n*\n, J.V. Ringwood\nCentre for Ocean Energy Research, Maynooth University, Co Kildare, Ireland\nARTICLE INFO\nKeywords:\nTriple helix\nWave energy policy\nWave energy stakeholders\nWind energy stakeholders\nWave energy commercialisation\nABSTRACT\nIrish wave energy technology holds significant economic potential and could be developed to establish an \nindigenous ind\n\nof development, allocated to the projects most likely to succeed, will \nsupport wave energy technology development in becoming a sustainable \nindigenous industry for Ireland. Many wave energy technologies have \nfoundered at mid-Technology Readiness Level (TRL) ( Weber (2012) ), \ndue to an exponential increase in costs at that stage ( Markham et al. \n(2010) ; Fitzgerald and Sharkey (2012) ), as developers begin to move \ntowards large-scale demonstration devices that need to be deployed and \nfun",
-    "status": "insufficient_context",
-    "timestamp": "2026-04-21T19:05:52.004365+00:00",
+    "id": "5fe89eac-9fc6-47ff-b05a-5cdf39e8e372",
+    "query": "what is a Triple Helix model ? do not brake this into multiple questions or sub queries",
+    "answer": "The Triple Helix model is a framework that describes the evolving, collaborative interactions between universities, industry, and government to drive innovation by integrating their distinct roles in knowledge generation, technology production, and regulation. It facilitates the transition from basic research to commercial application by bridging the gap between academic knowledge generation and industry market needs through government-supported initiatives.",
+    "status": "success",
+    "timestamp": "2026-04-21T20:31:15.662112+00:00",
     "evidence_count": 2,
-    "tokens_used": 1439,
-    "llm_calls": 4
+    "tokens_used": 681,
+    "llm_calls": 3
   },
   {
-    "id": "f542a123-ac7e-4c12-8fa3-df87b20ac42b",
-    "query": "what is wave energy",
-    "answer": "Insufficient context: the available documents do not contain enough information to answer this question confidently.\n\nBest available context:\nWave energy technology development in Ireland: Employing the triple helix \nmodel of innovation for pragmatic policy interventions\n☆\nC.A. Barry\n*\n, J.V. Ringwood\nCentre for Ocean Energy Research, Maynooth University, Co Kildare, Ireland\nARTICLE INFO\nKeywords:\nTriple helix\nWave energy policy\nWave energy stakeholders\nWind energy stakeholders\nWave energy commercialisation\nABSTRACT\nIrish wave energy technology holds significant economic potential and could be developed to establish an \nindigenous ind\n\nof development, allocated to the projects most likely to succeed, will \nsupport wave energy technology development in becoming a sustainable \nindigenous industry for Ireland. Many wave energy technologies have \nfoundered at mid-Technology Readiness Level (TRL) ( Weber (2012) ), \ndue to an exponential increase in costs at that stage ( Markham et al. \n(2010) ; Fitzgerald and Sharkey (2012) ), as developers begin to move \ntowards large-scale demonstration devices that need to be deployed and \nfun",
+    "id": "06859f03-e8e3-420d-8a36-415de05c38ae",
+    "query": "What is wave energy? do not brake this into multiple questions or sub queries",
+    "answer": "Insufficient context: the available documents do not contain enough information to answer this question confidently.\n\nBest available context:\nIrish wave energy offers significant economic potential but requires targeted public policy to achieve commercial viability. By applying the triple helix innovation methodology, this study provides a framework to align stakeholder perspectives and generate the consensus necessary for effective, evidence-based policy development.\n\nWave energy offers significant potential for global energy security and economic growth, particularly for Ireland, which possesses both vast natural resources and technical expertise. Despite this promise, the sector has yet to reach commercial viability due to high costs and development challenges at mid-Technology Readiness Levels. Targeted public policy support is essential to overcome these barriers and transition wave energy into a sustainable, mature industry.",
     "status": "insufficient_context",
-    "timestamp": "2026-04-21T19:14:07.623957+00:00",
-    "evidence_count": 3,
-    "tokens_used": 629,
+    "timestamp": "2026-04-21T20:33:51.764849+00:00",
+    "evidence_count": 2,
+    "tokens_used": 412,
     "llm_calls": 2
   }
 ]

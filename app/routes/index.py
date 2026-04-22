@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.models.schemas import IndexBuildResponse, IndexStatusResponse
-from app.services.ingestion_service import list_ingested_documents, load_parsed_chunks
+from app.services.ingestion_service import ingest_document, list_ingested_documents, load_parsed_chunks
 from app.services.tree_index_service import (
     build_index,
     get_index_node_count,
@@ -66,8 +66,26 @@ async def build_index_endpoint() -> IndexBuildResponse:
 
 @router.post("/refresh", response_model=IndexBuildResponse)
 async def refresh_index_endpoint() -> IndexBuildResponse:
-    """Force-rebuild the TreeIndex from all ingested documents."""
+    """Force-rebuild the TreeIndex, re-parsing all uploads first.
+
+    Re-running ingestion on each uploaded PDF ensures that the parsed JSON
+    files reflect the current section-aware chunking and summary logic before
+    the tree index is rebuilt.
+    """
     invalidate_cache()
+
+    # Re-parse every existing upload so parsed JSONs pick up section structure + summaries
+    upload_dir = settings.upload_dir
+    pdf_files = list(upload_dir.glob("*.pdf")) if upload_dir.exists() else []
+    if pdf_files:
+        logger.info("Re-parsing %d uploaded PDF(s) before rebuild …", len(pdf_files))
+        for pdf_path in pdf_files:
+            try:
+                file_bytes = pdf_path.read_bytes()
+                ingest_document(file_bytes=file_bytes, filename=pdf_path.name)
+                logger.info("Re-parsed: %s", pdf_path.name)
+            except Exception as exc:
+                logger.warning("Re-parse failed for '%s': %s — skipping.", pdf_path.name, exc)
 
     chunks = _collect_all_chunks()
     if not chunks:
@@ -129,6 +147,9 @@ async def tree_data_endpoint() -> dict:
             node_info[nid] = {
                 "text": data.get("text", "")[:200],
                 "page_number": meta.get("page_number", "?"),
+                "page_range": meta.get("page_range", [meta.get("page_number", "?")]),
+                "section": meta.get("section", ""),
+                "subsection": meta.get("subsection", ""),
                 "doc_name": meta.get("doc_name", ""),
             }
 

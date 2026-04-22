@@ -155,14 +155,19 @@ def _render_tree() -> None:
     for node in nodes:
         nid = node["id"]
         is_root = node.get("is_root", False)
-        page = node.get("page_number", "?")
-        doc = (node.get("doc_name") or "")[:40]
-        text = (node.get("text") or "")[:160].replace("\\n", " ")
-        label = f"Root\\np.{page}" if is_root else f"p.{page}"
+        section = (node.get("section") or "")[:30]
+        subsection = (node.get("subsection") or "")[:30]
+        page_range = node.get("page_range") or [node.get("page_number", "?")]
+        page_str = f"p.{page_range[0]}" if len(page_range) == 1 else f"p.{page_range[0]}-{page_range[-1]}"
+        preview = (node.get("text") or "")[:160].replace("\\n", " ")
+
+        label = (section[:20] or "Root") + f"\\n{page_str}" if is_root else (subsection[:20] or section[:20] or page_str)
         title = (
             f"<b>{'ROOT' if is_root else 'LEAF'}</b><br>"
-            f"Doc: {doc}<br>Page: {page}<br><br>"
-            f"<i>{text}</i>"
+            f"Section: {section}<br>"
+            + (f"Subsection: {subsection}<br>" if subsection else "")
+            + f"Pages: {page_str}<br><br>"
+            f"<i>{preview}</i>"
         )
         color = "#22c55e" if is_root else "#3b82f6"
         size = 28 if is_root else 14

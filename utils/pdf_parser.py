@@ -6,35 +6,43 @@ from typing import Any, Dict, List
 from langchain_community.document_loaders import PyPDFLoader
 
 from utils.logging_utils import get_logger
+from utils.section_detector import detect_sections
 
 logger = get_logger(__name__)
 
 
 def parse_pdf(file_path: Path) -> List[Dict[str, Any]]:
-    """Parse a PDF file and return one chunk dict per page using PyPDFLoader.
+    """Parse a PDF and return section-aware chunks via detect_sections().
 
     Each chunk contains:
-        - ``text``: the extracted text for the page (stripped).
-        - ``page_number``: 1-based page index.
-        - ``source``: absolute path of the source file as a string.
-        - ``char_count``: character count of the extracted text.
+        - ``text``        : full text of the section (may span multiple pages).
+        - ``section``     : L1 heading label.
+        - ``subsection``  : L2 heading label (empty string if none).
+        - ``level``       : 1 or 2.
+        - ``page_range``  : [first_page, last_page] (1-based).
+        - ``page_number`` : first_page (backwards-compat alias).
+        - ``source``      : absolute path of the source file.
+        - ``char_count``  : character count of the text.
 
-    Pages with no extractable text are skipped with a warning.
+    Falls back to LLM-based section detection when fewer than 2 regex headings
+    are found, and ultimately to one-chunk-per-page if the LLM also fails.
     """
     file_path = Path(file_path)
     logger.info("Parsing PDF: %s", file_path.name)
 
     try:
         loader = PyPDFLoader(str(file_path.resolve()))
-        pages = loader.load()
+        raw_pages = loader.load()
     except Exception as exc:
-        logger.error("Failed to parse '%s': %s", file_path.name, exc)
+        logger.error("Failed to load '%s': %s", file_path.name, exc)
         raise
 
-    logger.info("Total pages loaded: %d", len(pages))
+    logger.info("Total pages loaded from PyPDFLoader: %d", len(raw_pages))
 
-    chunks: List[Dict[str, Any]] = []
-    for page_doc in pages:
+    # Convert LangChain Document objects into plain dicts expected by detect_sections
+    source = str(file_path.resolve())
+    page_dicts: List[Dict[str, Any]] = []
+    for page_doc in raw_pages:
         text = (page_doc.page_content or "").strip()
         if not text:
             logger.warning(
@@ -43,16 +51,9 @@ def parse_pdf(file_path: Path) -> List[Dict[str, Any]]:
                 file_path.name,
             )
             continue
-        # PyPDFLoader stores 0-based page index; convert to 1-based
-        page_number = int(page_doc.metadata.get("page", 0)) + 1
-        chunks.append(
-            {
-                "text": text,
-                "page_number": page_number,
-                "source": str(file_path.resolve()),
-                "char_count": len(text),
-            }
-        )
+        page_number = int(page_doc.metadata.get("page", 0)) + 1  # 0-based → 1-based
+        page_dicts.append({"text": text, "page_number": page_number, "source": source})
 
-    logger.info("Extracted %d non-empty pages from '%s'.", len(chunks), file_path.name)
+    chunks = detect_sections(page_dicts)
+    logger.info("Produced %d section chunks from '%s'.", len(chunks), file_path.name)
     return chunks

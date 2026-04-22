@@ -34,6 +34,7 @@ def _chunks_to_documents(chunks: List[Dict[str, Any]]) -> List[Document]:
     """Convert parsed chunk dicts into LlamaIndex Document objects."""
     docs: List[Document] = []
     for chunk in chunks:
+        nested_meta = chunk.get("metadata", {})
         doc = Document(
             text=chunk["text"],
             metadata={
@@ -42,6 +43,11 @@ def _chunks_to_documents(chunks: List[Dict[str, Any]]) -> List[Document]:
                 "upload_timestamp": chunk.get("upload_timestamp", ""),
                 "tags": chunk.get("tags", []),
                 "source": chunk.get("source", ""),
+                # Section-aware chunking fields (stored in nested metadata by ingestion_service)
+                "summary": nested_meta.get("summary", ""),
+                "section": nested_meta.get("section", chunk.get("section", "")),
+                "subsection": nested_meta.get("subsection", chunk.get("subsection", "")),
+                "page_range": nested_meta.get("page_range", chunk.get("page_range", [])),
             },
         )
         docs.append(doc)
