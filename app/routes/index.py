@@ -51,8 +51,8 @@ async def build_index_endpoint() -> IndexBuildResponse:
         raise HTTPException(status_code=422, detail="No ingested documents found. Upload a PDF first.")
 
     try:
-        index = build_index(chunks)
-        node_count = len(index.index_struct.all_nodes)
+        index, build_stats = build_index(chunks)
+        node_count = build_stats["node_count"]
     except Exception as exc:
         logger.error("Index build failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Index build failed: {exc}") from exc
@@ -61,6 +61,8 @@ async def build_index_endpoint() -> IndexBuildResponse:
         status="built",
         node_count=node_count,
         message=f"TreeIndex built with {node_count} nodes.",
+        tokens_used=build_stats["tokens_used"],
+        llm_calls=build_stats["llm_calls"],
     )
 
 
@@ -92,8 +94,8 @@ async def refresh_index_endpoint() -> IndexBuildResponse:
         raise HTTPException(status_code=422, detail="No ingested documents found. Upload a PDF first.")
 
     try:
-        index = build_index(chunks)
-        node_count = len(index.index_struct.all_nodes)
+        index, build_stats = build_index(chunks)
+        node_count = build_stats["node_count"]
     except Exception as exc:
         logger.error("Index refresh failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Index refresh failed: {exc}") from exc
@@ -102,6 +104,8 @@ async def refresh_index_endpoint() -> IndexBuildResponse:
         status="built",
         node_count=node_count,
         message=f"TreeIndex rebuilt with {node_count} nodes.",
+        tokens_used=build_stats["tokens_used"],
+        llm_calls=build_stats["llm_calls"],
     )
 
 
@@ -153,13 +157,18 @@ async def tree_data_endpoint() -> dict:
                 "doc_name": meta.get("doc_name", ""),
             }
 
+    # Collect every node ID — both parents (keys) and children (values)
+    all_node_ids: set = set(edges_map.keys())
+    for children in edges_map.values():
+        all_node_ids.update(children)
+
     nodes = [
         {
             "id": nid,
             "is_root": nid in root_ids,
             **node_info.get(nid, {"text": "", "page_number": "?", "doc_name": ""}),
         }
-        for nid in edges_map
+        for nid in all_node_ids
     ]
 
     edge_list = [
