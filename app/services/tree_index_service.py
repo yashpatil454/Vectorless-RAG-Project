@@ -1,33 +1,22 @@
 from __future__ import annotations
 
 import os
-import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from llama_index.core import StorageContext, load_index_from_storage
-from llama_index.core.data_structs.data_structs import IndexGraph
-from llama_index.core.indices.tree.base import TreeIndex as _TreeIndex
-from llama_index.core.schema import TextNode
-from llama_index.llms.gemini import Gemini
 
 from app.config import settings
 from utils.logging_utils import get_logger
+from utils.tree_model import CustomTreeIndex, TreeNode
 
 logger = get_logger(__name__)
 
-_index_cache: Optional[_TreeIndex] = None
+_index_cache: Optional[CustomTreeIndex] = None
+_TREE_FILE = "tree.json"
 
 
-def _get_llm() -> Gemini:
-    return Gemini(
-        model=settings.model_name,
-        api_key=settings.google_api_key or os.environ.get("GOOGLE_API_KEY", ""),
-    )
-
-
-def _get_langchain_llm() -> ChatGoogleGenerativeAI:
+def _get_llm() -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(
         model=settings.model_name,
         google_api_key=settings.google_api_key or os.environ.get("GOOGLE_API_KEY", ""),
@@ -35,37 +24,33 @@ def _get_langchain_llm() -> ChatGoogleGenerativeAI:
     )
 
 
-def _make_node(text: str, metadata: Dict[str, Any]) -> TextNode:
-    return TextNode(id_=str(uuid.uuid4()), text=text, metadata=metadata)
+def _extract_tokens(response: Any) -> int:
+    rm = getattr(response, "response_metadata", None) or {}
+    rm_um = rm.get("usage_metadata", {}) if isinstance(rm, dict) else {}
+    if rm_um:
+        v = rm_um.get("total_token_count") or rm_um.get("totalTokenCount")
+        if v:
+            return int(v)
+    um = getattr(response, "usage_metadata", None)
+    if um is not None:
+        v = um.get("total_tokens", 0) if isinstance(um, dict) else getattr(um, "total_tokens", 0)
+        if v:
+            return int(v)
+    return 0
 
 
 def _llm_call(prompt: str, llm: ChatGoogleGenerativeAI, fallback: str) -> Tuple[str, int]:
-    """Single LLM call. Returns (text, tokens_used)."""
     try:
         response = llm.invoke(prompt)
-        tokens = 0
-        um = getattr(response, "usage_metadata", None)
-        if um is not None:
-            # UsageMetadata may be a TypedDict (dict) or a Pydantic/dataclass object
-            if isinstance(um, dict):
-                tokens = int(um.get("total_tokens", 0))
-            else:
-                tokens = int(
-                    getattr(um, "total_tokens", None)
-                    or getattr(um, "totalTokenCount", None)
-                    or 0
-                )
-        logger.debug("LLM call OK — tokens: %d", tokens)
-        return (response.content.strip(), tokens)
+        return (response.content.strip(), _extract_tokens(response))
     except Exception as exc:
-        logger.warning("LLM call failed: %s — using fallback.", exc)
+        logger.warning("LLM call failed: %s - using fallback.", exc)
         return (fallback, 0)
 
 
 def _summarize_leaf(
     text: str, section: str, doc_name: str, llm: ChatGoogleGenerativeAI
 ) -> Tuple[str, int]:
-    """Generate a 2-3 sentence summary for a leaf chunk."""
     if len(text) < 150:
         return (text, 0)
     prompt = (
@@ -78,7 +63,6 @@ def _summarize_leaf(
 def _summarize_group(
     texts: List[str], label: str, llm: ChatGoogleGenerativeAI
 ) -> Tuple[str, int]:
-    """Generate a 3-5 sentence summary for a group of texts (section or doc)."""
     combined = "\n\n---\n\n".join(t[:2000] for t in texts if t.strip())
     if not combined:
         return ("", 0)
@@ -91,43 +75,32 @@ def _summarize_group(
 
 def _build_hierarchical_tree(
     chunks: List[Dict[str, Any]],
-) -> Tuple[IndexGraph, Dict[str, TextNode], Dict[str, Any]]:
-    """Build a Doc → Section → Subsection → Leaf hierarchy.
-
-    All summarization happens here at build time:
-    - Leaf nodes:        1 LLM call per chunk (leaf summary)
-    - Subsection nodes:  no LLM call (concat of leaf summaries)
-    - Section nodes:     1 LLM call per section
-    - Doc root nodes:    1 LLM call per document
-    """
-    llm = _get_langchain_llm()
+) -> Tuple[CustomTreeIndex, Dict[str, Any]]:
+    llm = _get_llm()
     total_tokens = 0
     total_llm_calls = 0
+    all_nodes: Dict[str, TreeNode] = {}
+    root_ids: List[str] = []
 
-    # Group: {doc_name: {section: {subsection: [chunk]}}}
     grouped: Dict[str, Dict[str, Dict[str, List[Dict]]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(list))
     )
     for chunk in chunks:
         nested = chunk.get("metadata", {})
-        doc = chunk.get("doc_name") or nested.get("doc_name", "unknown")
+        doc = (chunk.get("doc_name") or nested.get("doc_name") or "unknown").strip()
         sec = (nested.get("section") or chunk.get("section") or "Document").strip() or "Document"
         sub = (nested.get("subsection") or chunk.get("subsection") or "").strip()
         grouped[doc][sec][sub].append(chunk)
 
-    index_graph = IndexGraph()
-    all_nodes: Dict[str, TextNode] = {}
-    root_counter = 0
-
     for doc_name, sections in grouped.items():
-        section_nodes: List[TextNode] = []
+        section_node_ids: List[str] = []
 
         for sec_title, subsections in sections.items():
-            subsec_nodes: List[TextNode] = []
+            subsec_node_ids: List[str] = []
 
             for sub_title, leaf_chunks in subsections.items():
-                # ── Leaf nodes (1 LLM call per chunk) ───────────────────────────────
-                leaves: List[TextNode] = []
+                leaf_ids: List[str] = []
+
                 for c in leaf_chunks:
                     nested = c.get("metadata", {})
                     leaf_summary, leaf_tokens = _summarize_leaf(
@@ -139,191 +112,144 @@ def _build_hierarchical_tree(
                     total_tokens += leaf_tokens
                     total_llm_calls += 1
 
-                    leaf = _make_node(
+                    nid = CustomTreeIndex.make_node_id()
+                    all_nodes[nid] = TreeNode(
+                        node_id=nid,
+                        node_type="leaf",
                         text=c["text"],
+                        summary=leaf_summary,
                         metadata={
                             "doc_name": doc_name,
                             "page_number": c.get("page_number", 0),
                             "upload_timestamp": c.get("upload_timestamp", ""),
                             "tags": c.get("tags", []),
                             "source": c.get("source", ""),
-                            "summary": leaf_summary,
                             "section": sec_title,
                             "subsection": sub_title,
                             "page_range": nested.get("page_range", c.get("page_range", [])),
                         },
+                        children=[],
                     )
-                    leaves.append(leaf)
-                    all_nodes[leaf.node_id] = leaf
-                    # Leaf nodes have no children — register with empty list so
-                    # LlamaIndex TreeRetriever never gets a KeyError on dict lookup
-                    index_graph.node_id_to_children_ids[leaf.node_id] = []
+                    leaf_ids.append(nid)
 
-                # ── Subsection node (no LLM — concat leaf summaries) ─────────────
                 if sub_title:
                     sub_text = "\n\n".join(
-                        n.metadata.get("summary") or n.text[:300] for n in leaves
+                        all_nodes[lid].summary or all_nodes[lid].text[:300]
+                        for lid in leaf_ids
                     )
-                    sub_node = _make_node(
+                    sub_id = CustomTreeIndex.make_node_id()
+                    all_nodes[sub_id] = TreeNode(
+                        node_id=sub_id,
+                        node_type="subsection",
                         text=sub_text,
+                        summary=sub_text[:400],
                         metadata={
                             "doc_name": doc_name,
                             "section": sec_title,
                             "subsection": sub_title,
-                            "node_type": "subsection",
                         },
+                        children=leaf_ids,
                     )
-                    all_nodes[sub_node.node_id] = sub_node
-                    index_graph.node_id_to_children_ids[sub_node.node_id] = [
-                        n.node_id for n in leaves
-                    ]
-                    subsec_nodes.append(sub_node)
+                    subsec_node_ids.append(sub_id)
                 else:
-                    # No subsection label — leaves sit directly under section
-                    subsec_nodes.extend(leaves)
+                    subsec_node_ids.extend(leaf_ids)
 
-            # ── Section node (1 LLM call) ───────────────────────────────────
-            sec_texts = [n.text[:1500] for n in subsec_nodes]
+            sec_texts = [
+                all_nodes[nid].summary or all_nodes[nid].text[:300]
+                for nid in subsec_node_ids
+            ]
             sec_summary, sec_tokens = _summarize_group(
-                sec_texts, f"{doc_name}/{sec_title}", llm
+                sec_texts, f"{doc_name} / {sec_title}", llm
             )
             total_tokens += sec_tokens
             total_llm_calls += 1
 
-            sec_node = _make_node(
+            sec_id = CustomTreeIndex.make_node_id()
+            all_nodes[sec_id] = TreeNode(
+                node_id=sec_id,
+                node_type="section",
                 text=sec_summary or "\n\n".join(sec_texts)[:600],
-                metadata={
-                    "doc_name": doc_name,
-                    "section": sec_title,
-                    "node_type": "section",
-                },
+                summary=sec_summary or "\n\n".join(sec_texts)[:300],
+                metadata={"doc_name": doc_name, "section": sec_title},
+                children=subsec_node_ids,
             )
-            all_nodes[sec_node.node_id] = sec_node
-            index_graph.node_id_to_children_ids[sec_node.node_id] = [
-                n.node_id for n in subsec_nodes
-            ]
-            section_nodes.append(sec_node)
+            section_node_ids.append(sec_id)
 
-        # ── Doc root node (1 LLM call) ─────────────────────────────────────
-        doc_texts = [n.text[:1500] for n in section_nodes]
+        doc_texts = [
+            all_nodes[nid].summary or all_nodes[nid].text[:300]
+            for nid in section_node_ids
+        ]
         doc_summary, doc_tokens = _summarize_group(doc_texts, doc_name, llm)
         total_tokens += doc_tokens
         total_llm_calls += 1
 
-        doc_node = _make_node(
+        doc_id = CustomTreeIndex.make_node_id()
+        all_nodes[doc_id] = TreeNode(
+            node_id=doc_id,
+            node_type="document",
             text=doc_summary or "\n\n".join(doc_texts)[:600],
-            metadata={"doc_name": doc_name, "node_type": "document"},
+            summary=doc_summary or "\n\n".join(doc_texts)[:300],
+            metadata={"doc_name": doc_name},
+            children=section_node_ids,
         )
-        all_nodes[doc_node.node_id] = doc_node
-        index_graph.node_id_to_children_ids[doc_node.node_id] = [
-            n.node_id for n in section_nodes
-        ]
-        index_graph.root_nodes[root_counter] = doc_node.node_id
-        root_counter += 1
+        root_ids.append(doc_id)
 
-    # Populate flat integer index required internally by LlamaIndex
-    for i, node_id in enumerate(all_nodes):
-        index_graph.all_nodes[i] = node_id
-
+    tree = CustomTreeIndex(root_ids=root_ids, nodes=all_nodes)
     build_stats = {
         "tokens_used": total_tokens,
         "llm_calls": total_llm_calls,
         "node_count": len(all_nodes),
     }
     logger.info(
-        "Hierarchical tree built: %d nodes, %d LLM calls, %d tokens",
+        "Tree built: %d nodes, %d LLM calls, %d tokens",
         len(all_nodes), total_llm_calls, total_tokens,
     )
-    return index_graph, all_nodes, build_stats
+    return tree, build_stats
 
 
-def build_index(chunks: List[Dict[str, Any]]) -> Tuple[_TreeIndex, Dict[str, Any]]:
-    """Build a hierarchical TreeIndex and persist it.
-
-    Returns (index, build_stats) where build_stats has:
-        tokens_used, llm_calls, node_count
-    """
+def build_index(chunks: List[Dict[str, Any]]) -> Tuple[CustomTreeIndex, Dict[str, Any]]:
     global _index_cache
     settings.ensure_dirs()
-
-    from llama_index.core import Settings as LISettings
-
-    llm = _get_llm()
-    LISettings.llm = llm
-    LISettings.embed_model = None  # type: ignore[assignment]
-
-    logger.info("Building hierarchical TreeIndex from %d chunks …", len(chunks))
-    index_graph, all_nodes, build_stats = _build_hierarchical_tree(chunks)
-
-    storage_context = StorageContext.from_defaults()
-    storage_context.docstore.add_documents(list(all_nodes.values()))
-
-    index = _TreeIndex(
-        index_struct=index_graph,
-        storage_context=storage_context,
-    )
-    persist_path = str(settings.index_store_dir)
-    index.storage_context.persist(persist_dir=persist_path)
-    logger.info("TreeIndex persisted to: %s", persist_path)
-
-    _index_cache = index
-    return index, build_stats
+    logger.info("Building custom tree from %d chunks ...", len(chunks))
+    tree, build_stats = _build_hierarchical_tree(chunks)
+    tree_path = settings.index_store_dir / _TREE_FILE
+    tree.save(tree_path)
+    logger.info("Tree persisted to: %s", tree_path)
+    _index_cache = tree
+    return tree, build_stats
 
 
-def load_index() -> Optional[_TreeIndex]:
-    """Load a previously persisted TreeIndex from disk.
-
-    Returns ``None`` if no persisted index is found.
-    """
+def load_index() -> Optional[CustomTreeIndex]:
     global _index_cache
-
     if _index_cache is not None:
         return _index_cache
-
-    persist_path = settings.index_store_dir
-    if not (persist_path / "docstore.json").exists():
-        logger.info("No persisted index found at: %s", persist_path)
+    tree_path = settings.index_store_dir / _TREE_FILE
+    if not tree_path.exists():
+        logger.info("No persisted tree found at: %s", tree_path)
         return None
-
-    logger.info("Loading TreeIndex from: %s", persist_path)
     try:
-        from llama_index.core import Settings as LISettings
-
-        llm = _get_llm()
-        LISettings.llm = llm
-        LISettings.embed_model = None  # type: ignore[assignment]
-
-        storage_context = StorageContext.from_defaults(persist_dir=str(persist_path))
-        index = load_index_from_storage(storage_context)
-        _index_cache = index
-        logger.info("TreeIndex loaded successfully.")
-        return index
+        tree = CustomTreeIndex.load(tree_path)
+        _index_cache = tree
+        logger.info("Custom tree loaded: %d nodes.", len(tree.nodes))
+        return tree
     except Exception as exc:
-        logger.error("Failed to load index: %s", exc)
+        logger.error("Failed to load tree: %s", exc)
         return None
 
 
-def get_or_build_index(chunks: List[Dict[str, Any]]) -> _TreeIndex:
-    """Return the cached or persisted index, building it from chunks if needed."""
+def get_or_build_index(chunks: List[Dict[str, Any]]) -> CustomTreeIndex:
     existing = load_index()
     if existing is not None:
         return existing
-    index, _ = build_index(chunks)
-    return index
+    tree, _ = build_index(chunks)
+    return tree
 
 
 def get_index_node_count() -> Optional[int]:
-    """Return the number of nodes in the loaded index, or None."""
-    index = load_index()
-    if index is None:
-        return None
-    try:
-        return len(index.index_struct.all_nodes)
-    except Exception:
-        return None
+    tree = load_index()
+    return len(tree.nodes) if tree is not None else None
 
 
 def invalidate_cache() -> None:
-    """Clear the module-level index cache to force a reload from disk."""
     global _index_cache
     _index_cache = None

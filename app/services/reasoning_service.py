@@ -57,13 +57,27 @@ def _add_trace(state: ReasoningState, step_num: int, action: str, notes: str) ->
     state["trace"].append({"step": step_num, "action": action, "notes": notes})
 
 
+def _extract_tokens(response: Any) -> int:
+    """Gemini-native path first, then LangChain standard."""
+    rm = getattr(response, "response_metadata", None) or {}
+    rm_um = rm.get("usage_metadata", {}) if isinstance(rm, dict) else {}
+    if rm_um:
+        v = rm_um.get("total_token_count") or rm_um.get("totalTokenCount")
+        if v:
+            return int(v)
+    um = getattr(response, "usage_metadata", None)
+    if um is not None:
+        v = um.get("total_tokens", 0) if isinstance(um, dict) else getattr(um, "total_tokens", 0)
+        if v:
+            return int(v)
+    return 0
+
+
 def _invoke_llm(llm: ChatGoogleGenerativeAI, prompt: str, state: ReasoningState) -> Any:
     """Invoke the LLM, accumulate token usage and call count into state."""
     response = llm.invoke(prompt)
     state["llm_calls"] += 1
-    usage = getattr(response, "usage_metadata", None) or {}
-    if isinstance(usage, dict):
-        state["tokens_used"] += usage.get("total_tokens", 0)
+    state["tokens_used"] += _extract_tokens(response)
     return response
 
 

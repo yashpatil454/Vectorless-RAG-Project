@@ -21,6 +21,8 @@ class IndexBuildResponse(BaseModel):
     status: Literal["built", "loaded", "already_exists"]
     node_count: int
     message: str
+    tokens_used: int = 0
+    llm_calls: int = 0
 
 
 class IndexStatusResponse(BaseModel):

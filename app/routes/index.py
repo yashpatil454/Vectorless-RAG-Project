@@ -122,59 +122,36 @@ async def index_status_endpoint() -> IndexStatusResponse:
 
 @router.get("/tree")
 async def tree_data_endpoint() -> dict:
-    """Return nodes and edges for tree visualization.
+    """Return nodes and edges for tree visualization, read from tree.json."""
+    from utils.tree_model import CustomTreeIndex
 
-    Reads directly from the persisted index_store.json and docstore.json so
-    the index does not need to be loaded into memory.
-    """
-    index_store_path = settings.index_store_dir / "index_store.json"
-    docstore_path = settings.index_store_dir / "docstore.json"
-
-    if not index_store_path.exists():
+    tree_path = settings.index_store_dir / "tree.json"
+    if not tree_path.exists():
         raise HTTPException(status_code=404, detail="No index found. Build an index first.")
 
-    index_raw = json.loads(index_store_path.read_text(encoding="utf-8"))
-    tree_entry = list(index_raw["index_store/data"].values())[0]["__data__"]
-    tree_data: dict = tree_entry if isinstance(tree_entry, dict) else json.loads(tree_entry)
+    try:
+        tree = CustomTreeIndex.load(tree_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to load tree: {exc}") from exc
 
-    edges_map: dict = tree_data["node_id_to_children_ids"]
-    root_ids: set = set(tree_data["root_nodes"].values())
+    root_ids = set(tree.root_ids)
+    nodes = []
+    edges = []
 
-    node_info: dict = {}
-    if docstore_path.exists():
-        docstore_raw = json.loads(docstore_path.read_text(encoding="utf-8"))
-        for nid, entry in docstore_raw.get("docstore/data", {}).items():
-            data = entry["__data__"]
-            if isinstance(data, str):
-                data = json.loads(data)
-            meta = data.get("metadata", {})
-            node_info[nid] = {
-                "text": data.get("text", "")[:200],
-                "page_number": meta.get("page_number", "?"),
-                "page_range": meta.get("page_range", [meta.get("page_number", "?")]),
-                "section": meta.get("section", ""),
-                "subsection": meta.get("subsection", ""),
-                "doc_name": meta.get("doc_name", ""),
-            }
-
-    # Collect every node ID — both parents (keys) and children (values)
-    all_node_ids: set = set(edges_map.keys())
-    for children in edges_map.values():
-        all_node_ids.update(children)
-
-    nodes = [
-        {
+    for nid, node in tree.nodes.items():
+        nodes.append({
             "id": nid,
             "is_root": nid in root_ids,
-            **node_info.get(nid, {"text": "", "page_number": "?", "doc_name": ""}),
-        }
-        for nid in all_node_ids
-    ]
+            "node_type": node.node_type,
+            "text": node.text[:200],
+            "summary": node.summary[:200] if node.summary else "",
+            "section": node.metadata.get("section", ""),
+            "subsection": node.metadata.get("subsection", ""),
+            "doc_name": node.metadata.get("doc_name", ""),
+            "page_number": node.metadata.get("page_number", "?"),
+            "page_range": node.metadata.get("page_range", [node.metadata.get("page_number", "?")]),
+        })
+        for child_id in node.children:
+            edges.append({"from": nid, "to": child_id})
 
-    edge_list = [
-        {"from": parent, "to": child}
-        for parent, children in edges_map.items()
-        for child in children
-    ]
-
-    return {"nodes": nodes, "edges": edge_list, "root_count": len(root_ids)}
+    return {"nodes": nodes, "edges": edges, "root_count": len(root_ids)}
