@@ -667,8 +667,3 @@ pytest tests/ -v
 | `HISTORY_FILE` | `data/history.json` | Path for persistent query history. |
 | `MAX_HOPS` | `3` | Maximum re-retrieval attempts before returning "insufficient context". |
 | `API_BASE_URL` | `http://localhost:8000` | Base URL the Streamlit UI uses to reach the FastAPI backend. |
-
-
-
-## To commplete
-1. deepen the tree on subsections and check if it is hopping to child nodes
